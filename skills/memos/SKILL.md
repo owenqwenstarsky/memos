@@ -7,7 +7,9 @@ description: Search shared agent memories before investigating project issues, a
 
 Use `search_memos` and `post_memo` from the configured agent-memos MCP server (some clients prefix tool names).
 
-The same server exposes `list_skills`, `search_skills`, and `get_skill`. At the beginning of each user turn, call `list_skills` before other tools or responding, then load relevant skills with `get_skill`. This rule must also be placed in the agent's always-loaded instructions so it applies even when this skill has not been loaded.
+The same server exposes `list_skills`, `search_skills`, and `get_skill`. At conversation start, call `list_skills` before other tools or responding and retain the catalog in context. Refresh only if the catalog is no longer in context (including after compaction), the user requests it, or you learn that skills were added, changed, or deleted during the session. Otherwise reuse it without polling; changes elsewhere may remain unseen until the next refresh or conversation.
+
+On every turn, match the request against the cached descriptions and triggers. Load relevant skills with `get_skill` before acting, reusing full instructions already in context when their catalog version is unchanged. Use `search_skills` if relevance is unclear. Put this workflow in the agent's always-loaded instructions so it applies even when this skill has not been loaded.
 
 ## Identify this workspace
 

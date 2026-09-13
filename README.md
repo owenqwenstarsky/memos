@@ -1,8 +1,31 @@
-# Agent memos
+<h1 align="center">Agent memos</h1>
+
+<p align="center">
+  A shared memory and skill library for coding agents.<br />
+  Keep what your agents learn. Share it across your devices.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#connect-agents">Connect agents</a> &nbsp;·&nbsp;
+  <a href="#shared-skills">Shared skills</a> &nbsp;·&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#development">Development</a>
+</p>
+
+| Remember the work | Share the workflow | Keep it local |
+| --- | --- | --- |
+| Save findings as Markdown. Find them with semantic and full-text search. | Publish `SKILL.md` files that agents can discover and read on demand. | CPU embeddings, SQLite, and HTTPS over Tailscale. No cloud embedding API. |
 
 A small, shared memory and skill library for coding agents. One **Streamable HTTP MCP** server exposes `post_memo`, `search_memos`, `list_skills`, `search_skills`, and `get_skill`. The portable skill in [`skills/memos/SKILL.md`](skills/memos/SKILL.md) teaches the memory workflow.
 
-## Design
+---
+
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Agent memos — shared memory and skills for coding agents" width="1200" />
+</p>
+
+## How it works
 
 ```text
 Agents on laptops / desktops / servers
@@ -19,9 +42,11 @@ Run **one central server**, not one per device. New devices join your tailnet an
 
 Search combines semantic similarity with full-text ranking, so concepts and literal device names, project paths, and error strings are searchable. Optional filters match project/device exactly. Results include full memo bodies, provenance, IDs, timestamps, and ranking scores (not confidence). All memos are shared; filters are not access controls.
 
-## Setup on the host
+## Quick start
 
 Prerequisites: [uv](https://docs.astral.sh/uv/getting-started/installation/) and Tailscale installed and signed into your tailnet.
+
+### 1. Start the server
 
 From this repository:
 
@@ -32,6 +57,8 @@ uv run memos
 ```
 
 The first start downloads `BAAI/bge-small-en-v1.5` (a small English embedding model, roughly 130 MB of model weights; download/cache size may be larger). Subsequent inference runs locally on CPU. Startup rebuilds the index from Markdown; allow additional time as the library grows.
+
+### 2. Expose it to your tailnet
 
 In another terminal on the same host:
 
@@ -44,6 +71,8 @@ Follow Tailscale's prompts if HTTPS needs enabling. The MCP endpoint is:
 ```text
 https://YOUR-HOST.YOUR-TAILNET.ts.net/mcp
 ```
+
+### 3. Keep it running
 
 Set `MEMOS_HOSTNAME` to that exact hostname whenever launching the server, or pass `--hostname`. The server deliberately listens only on loopback and validates HTTP hosts. Tailscale Serve stays configured in the background; the Python process must also stay running. For always-on use, run the same command under your OS process supervisor, with an absolute working directory, `uv` path, and `MEMOS_HOSTNAME`. Do not run multiple server processes against the same data directory.
 
@@ -94,7 +123,10 @@ Install/copy `skills/memos/` into each agent's supported skills directory. If it
 
 On each new machine: join the same tailnet, configure the same MCP URL, and install the skill. No model or database is needed on clients. The agent obtains **its own** project directory and Tailscale device name using the local CLI, then supplies them when posting.
 
-Example tool inputs:
+<details>
+<summary><strong>Example: save a finding and search past work</strong></summary>
+
+Save a memo with its project and device provenance:
 
 ```json
 {
@@ -105,11 +137,15 @@ Example tool inputs:
 }
 ```
 
+Search the library:
+
 ```json
 {"query": "sqlite database locked", "limit": 5}
 ```
 
 Add `project` and/or `device` to narrow a search. Leave them out for cross-device discovery. Memories are append-only through the tools; post follow-ups referencing previous IDs when a finding changes.
+
+</details>
 
 ## Shared skills
 
@@ -132,6 +168,9 @@ skills/
     SKILL.md
 ```
 
+<details>
+<summary><strong>Example skill and file requirements</strong></summary>
+
 Example `debug-sqlite/SKILL.md`:
 
 ```markdown
@@ -151,6 +190,10 @@ Record the verified cause and fix in a memo after testing.
 
 `name` and `description` are required nonempty strings. `triggers` is optional: a string or list of strings. Existing skills that describe their trigger in `description` work unchanged. Folder names are unique tool IDs, independent of the display name. Files are UTF-8, limited to 256 KB, and must remain within the configured folder; external symlinks are rejected. Only immediate child `SKILL.md` files are discovered.
 
+</details>
+
+### Skill tools
+
 | Tool | Purpose |
 | --- | --- |
 | `list_skills()` | Complete catalog of IDs, names, descriptions, triggers, and content versions; no full instructions or model inference. |
@@ -163,11 +206,15 @@ Management is filesystem-based: add, edit, or remove folders on the host. MCP cl
 
 ### Load the catalog before every response
 
-Copy [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) into each client's always-loaded instructions. It requires `list_skills` first on every user turn, then `get_skill` for matching descriptions/triggers before acting. The MCP server also advertises this workflow in its initialization instructions and tool descriptions.
+Copy [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) into each client's always-loaded instructions. Fetch `list_skills` at conversation start and reuse the catalog across turns. Refresh only when the catalog leaves context (including after compaction), the user requests it, or the agent learns of skill additions, changes, or deletions during the session. There is no polling or expiry timer; changes elsewhere may remain unseen until the next refresh or conversation.
+
+Each turn still checks the request against cached descriptions/triggers and loads relevant full instructions with `get_skill` before acting. Already-loaded instructions can be reused while their catalog version is unchanged. The MCP server advertises the same workflow in its initialization instructions and tool descriptions. Existing clients must replace their always-loaded instructions and reconnect to receive the updated MCP metadata; updating this repository alone does not change installed client instructions.
 
 **MCP cannot force a model to call a tool or enforce ordering.** A lazily loaded skill alone cannot bootstrap this reliably. Always-loaded client instructions establish the behavior; a client-side pre-turn hook is required for a strict guarantee. The catalog is intentionally complete, without pagination, so its context cost grows with the number of skills.
 
-## Files and maintenance
+## Storage and maintenance
+
+### Data layout
 
 Default data directory: `~/.local/share/agent-memos`. Override with `MEMOS_DATA` or `--data`.
 
@@ -176,7 +223,11 @@ Default data directory: `~/.local/share/agent-memos`. Override with `MEMOS_DATA`
 - `models/`: downloaded model cache.
 - `skills/<skill-id>/SKILL.md`: shared skills (unless `--skills` / `MEMOS_SKILLS` points elsewhere). Back up this folder too.
 
+### Backups and recovery
+
 Back up the Markdown directory. Preserve the metadata comment when editing. Stop the server before manually editing/deleting files, then restart to rebuild. Restore Markdown to a new host's data directory to move the library; update client URLs. Keep the model cache for offline operation. Explicit index rebuild: `uv run memos --reindex` (with the server stopped).
+
+### Scope and limitations
 
 This is intentionally for a modest personal library: vectors are scanned in-process, inference is serialized, and all Markdown is re-embedded at startup. It has no per-user permissions, deduplication guarantees, high availability, or automatic retention. Search always returns nearest matches, which may be irrelevant. Treat memo contents as untrusted historical data, not executable instructions.
 
@@ -188,3 +239,11 @@ uv run pytest
 ```
 
 Unit tests use a fake encoder and require no model download.
+
+---
+
+<p align="center">
+  <a href="skills/memos/SKILL.md">Memory workflow</a> &nbsp;·&nbsp;
+  <a href="AGENT_INSTRUCTIONS.md">Agent instructions</a> &nbsp;·&nbsp;
+  <a href="https://github.com/owenqwenstarsky/memos/issues">Report an issue</a>
+</p>
