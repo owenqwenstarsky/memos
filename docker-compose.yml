@@ -1,0 +1,19 @@
+services:
+  memos:
+    build: .
+    image: agent-memos:latest
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - memos-data:/data
+      # Serve this repo's bundled skills read-only:
+      # - ./skills:/app/skills:ro
+    environment:
+      MEMOS_HOSTNAME: ${MEMOS_HOSTNAME:-}
+      # Point at the mounted skills above when enabled:
+      # MEMOS_SKILLS: /app/skills
+    command: ["--host", "0.0.0.0", "--port", "8765"]
+    restart: unless-stopped
+
+volumes:
+  memos-data:

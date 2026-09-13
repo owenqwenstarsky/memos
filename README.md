@@ -49,6 +49,33 @@ Set `MEMOS_HOSTNAME` to that exact hostname whenever launching the server, or pa
 
 **Security:** use Tailscale **Serve**, not public **Funnel**. This service has no separate application authentication. Restrict access to the host's HTTPS port using tailnet grants/ACLs; everyone allowed to connect can read and post all memories and read all published skills. Local users can also reach the loopback endpoint. Device/project values are agent-reported provenance, not verified identity. Never store secrets. A shared host with untrusted local users requires an additional authentication boundary.
 
+## Run with Docker
+
+```sh
+export MEMOS_HOSTNAME="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+docker compose up --build -d
+tailscale serve --bg http://127.0.0.1:8765
+```
+
+The container binds `0.0.0.0:8765` internally and publishes it on host loopback only (`127.0.0.1:8765`), so the Tailscale step above stays the same. `MEMOS_HOSTNAME` is passed through for HTTP host validation; without it, tailnet hostnames are rejected. The first start downloads the embedding model into the `memos-data` volume, which also holds memos, the index, and (by default) skills.
+
+Useful variants:
+
+```sh
+# Plain docker run with a named volume:
+docker build -t agent-memos .
+docker run -d --name memos -p 127.0.0.1:8765:8765 \
+  -e MEMOS_HOSTNAME="YOUR-HOST.YOUR-TAILNET.ts.net" \
+  -v memos-data:/data agent-memos
+
+# Serve this repo's bundled skills read-only:
+docker run -d --name memos -p 127.0.0.1:8765:8765 \
+  -v memos-data:/data -v ./skills:/app/skills:ro \
+  -e MEMOS_SKILLS=/app/skills agent-memos
+```
+
+`--host` / `MEMOS_HOST` and `--port` / `MEMOS_PORT` override the bind address and port; the defaults remain loopback `127.0.0.1:8765` outside Docker. Do not run two servers against the same `/data` volume.
+
 ## Connect agents
 
 Add this to clients that support the `mcpServers` / `url` configuration format (some clients additionally require `"type": "http"`; follow your client's schema):
