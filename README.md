@@ -179,7 +179,9 @@ Management is filesystem-based: add, edit, or remove folders on the host. MCP cl
 
 ### Load the catalog before every response
 
-Copy [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) into each client's always-loaded instructions. It requires `list_skills` first on every user turn, then `get_skill` for matching descriptions/triggers before acting. The MCP server also advertises this workflow in its initialization instructions and tool descriptions.
+Copy [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) into each client's always-loaded instructions. Fetch `list_skills` at conversation start and reuse the catalog across turns. Refresh only when the catalog leaves context (including after compaction), the user requests it, or the agent learns of skill additions, changes, or deletions during the session. There is no polling or expiry timer; changes elsewhere may remain unseen until the next refresh or conversation.
+
+Each turn still checks the request against cached descriptions/triggers and loads relevant full instructions with `get_skill` before acting. Already-loaded instructions can be reused while their catalog version is unchanged. The MCP server advertises the same workflow in its initialization instructions and tool descriptions. Existing clients must replace their always-loaded instructions and reconnect to receive the updated MCP metadata; updating this repository alone does not change installed client instructions.
 
 **MCP cannot force a model to call a tool or enforce ordering.** A lazily loaded skill alone cannot bootstrap this reliably. Always-loaded client instructions establish the behavior; a client-side pre-turn hook is required for a strict guarantee. The catalog is intentionally complete, without pagination, so its context cost grows with the number of skills.
 
