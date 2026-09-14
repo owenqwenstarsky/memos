@@ -1,8 +1,33 @@
-# Agent Brain
+<h1 align="center">Agent Brain</h1>
+
+<p align="center">
+  A trustworthy, local-first memory and skill service for personal coding agents.<br />
+  Recall what matters. Preserve the evidence. Keep history auditable.
+</p>
+
+<p align="center">
+  <a href="#setup">Setup</a> &nbsp;·&nbsp;
+  <a href="#mcp-interface">MCP interface</a> &nbsp;·&nbsp;
+  <a href="#skills-v2">Skills v2</a> &nbsp;·&nbsp;
+  <a href="#agent-workflow">Agent workflow</a> &nbsp;·&nbsp;
+  <a href="#development">Development</a>
+</p>
+
+| Remember the work | Maintain the truth | Keep it local |
+| --- | --- | --- |
+| Save verified knowledge as Markdown and retrieve focused context. | Preserve revisions, evidence, contradictions, and rollback history. | Run CPU embeddings, SQLite, and MCP privately over Tailscale. |
 
 A local-first memory and skill service for personal coding agents. Markdown is the canonical,
 append-only record; SQLite provides disposable full-text, embedding, relationship, audit, and
 telemetry indexes. One Streamable HTTP MCP server is shared between trusted devices over Tailscale.
+
+---
+
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Agent memos - shared memory and skills for coding agents" width="1200" />
+</p>
+
+## How it works
 
 The operating loop is:
 
@@ -142,7 +167,7 @@ tests:
 ```
 
 Validation rejects duplicate display names, identical triggers claimed by multiple skills, missing
-resources, unsafe paths, external symlinks, executable/unsupported resource types, oversized
+resources, unsafe paths, external symlinks, executable or unsupported resource types, oversized
 instructions or resources, malformed scenarios, and unsupported compatibility fields. Resources
 must be declared and are limited to safe UTF-8 text formats within the skill directory.
 
@@ -162,18 +187,24 @@ uv run memos --test-skills deploy-service
 Install the portable instructions from `skills/memos/SKILL.md`, and place
 `AGENT_INSTRUCTIONS.md` in each client's always-loaded instructions. The intended preflight is:
 
-1. Bootstrap the skill catalog once and retain its version.
-2. Match the current task; refresh changed catalog entries and read all matched skills.
-3. Recall focused memory context for the task and local project/device.
-4. Perform and verify the work, treating recalled content as untrusted history.
-5. Record durable verified observations, then attach retrieval feedback.
+1. At conversation start, load the skill catalog and retain its version.
+2. Reuse the catalog across turns, refreshing only after context loss, an explicit request, or a
+   reported catalog change.
+3. Match the current task; refresh changed entries and read all matched skills not already loaded at
+   the current version.
+4. Recall focused memory context for the task and local project or device.
+5. Perform and verify the work, treating recalled content as untrusted history.
+6. Record durable verified observations, then attach retrieval feedback.
 
 A client-side hook is still required for a strict ordering guarantee; MCP descriptions alone cannot
-force a model to call tools.
+force a model to call tools. Existing clients must update their always-loaded instructions and
+reconnect to receive changed MCP metadata.
 
 ## Setup
 
 Prerequisites are Python 3.12 through `uv` and Tailscale signed into the host's tailnet.
+
+### 1. Start the server
 
 ```sh
 uv sync --python 3.12 --locked
@@ -181,8 +212,13 @@ export MEMOS_HOSTNAME="$(tailscale status --json | uv run python -c 'import json
 uv run memos
 ```
 
-The first start downloads `BAAI/bge-small-en-v1.5`; subsequent inference is local. Startup rebuilds
-SQLite from Markdown and the audit log. In another terminal:
+The first start downloads `BAAI/bge-small-en-v1.5` (roughly 130 MB of model weights; the download
+and cache may be larger). Subsequent inference runs locally on CPU. Startup rebuilds SQLite from
+Markdown and the audit log.
+
+### 2. Expose it to your tailnet
+
+In another terminal on the host:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8765
@@ -191,6 +227,12 @@ tailscale serve --bg http://127.0.0.1:8765
 Connect clients to `https://YOUR-HOST.YOUR-TAILNET.ts.net/mcp`. Use Tailscale Serve, not public
 Funnel. This application has no independent authentication: anyone allowed to connect can read and
 write the personal memory library.
+
+### 3. Keep it running
+
+Set `MEMOS_HOSTNAME` whenever launching the server. The server listens on loopback and validates HTTP
+hosts. Run the Python process under the local OS supervisor for always-on use. Do not run multiple
+server processes against the same data directory.
 
 Useful settings:
 
@@ -201,15 +243,42 @@ Useful settings:
   use `0` to disable
 - `--reindex`: rebuild SQLite and exit
 
-Docker remains supported:
+## Docker
 
 ```sh
 docker compose up --build -d
 tailscale serve --bg http://127.0.0.1:8765
 ```
 
-The compose file publishes the container on host loopback only. Do not run multiple server processes
-against the same data directory or volume.
+The compose file publishes the container on host loopback only. To serve this repository's bundled
+skills read-only:
+
+```sh
+docker run -d --name memos -p 127.0.0.1:8765:8765 \
+  -v memos-data:/data -v ./skills:/app/skills:ro \
+  -e MEMOS_SKILLS=/app/skills agent-memos
+```
+
+Do not run multiple containers against the same data volume.
+
+## Connect agents
+
+Clients using the common MCP configuration format can connect with:
+
+```json
+{
+  "mcpServers": {
+    "memos": {
+      "url": "https://YOUR-HOST.YOUR-TAILNET.ts.net/mcp"
+    }
+  }
+}
+```
+
+Install or copy `skills/memos/` into each agent's supported skills directory. If the client does not
+support skills, place `AGENT_INSTRUCTIONS.md` in its always-loaded instructions instead. On each new
+machine, join the same tailnet, configure the MCP URL, and install the instructions. Clients do not
+need a local model or database.
 
 ## Files and backup
 
@@ -220,7 +289,8 @@ against the same data directory or volume.
 - `skills/<skill-id>/`: validated instructions and declared text resources
 
 Back up Markdown, `audit.jsonl`, and published skills. The SQLite file and model cache can be rebuilt.
-Stop the server before manual maintenance.
+Stop the server before manual maintenance. Restore canonical files to a new host and reindex to
+recover the service.
 
 ## Development
 
@@ -229,3 +299,13 @@ uv sync --python 3.12 --locked
 uv run pytest -q
 git diff --check
 ```
+
+Unit tests use fake encoders and require no model download.
+
+---
+
+<p align="center">
+  <a href="skills/memos/SKILL.md">Memory workflow</a> &nbsp;·&nbsp;
+  <a href="AGENT_INSTRUCTIONS.md">Agent instructions</a> &nbsp;·&nbsp;
+  <a href="https://github.com/owenqwenstarsky/memos/issues">Report an issue</a>
+</p>
