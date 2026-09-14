@@ -523,6 +523,18 @@ class Store:
             return 0.35
         return 0.55
 
+    @staticmethod
+    def _same_applicability(left: dict[str, Any], right: dict[str, Any]) -> bool:
+        if left["scope"] != right["scope"]:
+            return False
+        if left["scope"] == "global":
+            return True
+        if left["scope"] in {"repository", "project"}:
+            return left["project"] == right["project"]
+        if left["scope"] == "device":
+            return left["device"] == right["device"]
+        return False
+
     def _rank(
         self,
         query: str,
@@ -854,13 +866,60 @@ class Store:
         if kind == "fact" and confidence < 0.5:
             kind, status = "open_question", "unverified"
         selected_scope = scope or ("device" if kind == "incident" else "project")
+        expires_at = None
+        if kind == "incident":
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+        elif kind == "fact" and selected_scope == "device":
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         fingerprint = _content_hash(content)
+        observation = {
+            "scope": selected_scope,
+            "project": project.strip(),
+            "device": device.strip(),
+        }
         with self.lock:
-            duplicate = self.db.execute(
-                "SELECT * FROM memos WHERE content_hash=? ORDER BY created_at DESC LIMIT 1",
-                (fingerprint,),
-            ).fetchone()
+            duplicates = [
+                row for row in self._rows(historical=True)
+                if row["content_hash"] == fingerprint
+                and self._same_applicability(row, observation)
+            ]
+            duplicate = max(
+                duplicates,
+                key=lambda row: (row["effective_status"] == "active", row["created_at"]),
+                default=None,
+            )
             if duplicate:
+                old_evidence = json.loads(duplicate["evidence"] or "[]")
+                combined_evidence = list(dict.fromkeys([*old_evidence, *evidence_values]))
+                promoted = (
+                    status == "active"
+                    and (
+                        duplicate["effective_status"] != "active"
+                        or confidence > float(duplicate["confidence"])
+                        or combined_evidence != old_evidence
+                    )
+                )
+                if promoted:
+                    memory = self.post(
+                        self._title_from_content(content), content, project, device,
+                        kind=kind, scope=selected_scope, status=status,
+                        confidence=max(confidence, float(duplicate["confidence"])),
+                        importance=max(0.6 if kind in {"preference", "decision"} else 0.5,
+                                       float(duplicate["importance"])),
+                        expires_at=expires_at, source=source, evidence=combined_evidence,
+                        relationships=[{"type": "supersedes", "target_id": duplicate["id"]}],
+                        actor=source, source_interaction=source,
+                        reason="equivalent observation supplied stronger evidence",
+                    )
+                    with self.db:
+                        self._increment_metric("observations_recorded")
+                        self._increment_metric("observations_promoted")
+                    return {
+                        "memory_id": memory["id"], "deduplicated": False,
+                        "promoted_from": duplicate["id"], "kind": kind,
+                        "status": status, "confidence": memory["confidence"],
+                        "relationships": memory["relationships"],
+                    }
                 with self.db:
                     self._append_event(
                         duplicate["id"], "reinforced", actor=source,
@@ -871,16 +930,11 @@ class Store:
                 return {"memory_id": duplicate["id"], "deduplicated": True, "kind": duplicate["kind"]}
 
             relationships = []
-            active_rows = self._rows(project=project, device=None)
+            active_rows = self._rows()
             for row in active_rows:
-                if self._contradicts(content, row["body"]):
+                if self._same_applicability(row, observation) and self._contradicts(content, row["body"]):
                     relationships.append({"type": "contradicts", "target_id": row["id"]})
                     break
-            expires_at = None
-            if kind == "incident":
-                expires_at = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
-            elif kind == "fact" and selected_scope == "device":
-                expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
             memory = self.post(
                 self._title_from_content(content), content, project, device,
                 kind=kind, scope=selected_scope, status=status, confidence=confidence,
@@ -928,6 +982,8 @@ class Store:
                 left_words = _words(left["title"] + "\n" + left["body"])
                 for right in merge_rows[index + 1:]:
                     if right["id"] in used:
+                        continue
+                    if not self._same_applicability(left, right):
                         continue
                     right_words = _words(right["title"] + "\n" + right["body"])
                     overlap = len(left_words & right_words) / max(len(left_words | right_words), 1)

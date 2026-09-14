@@ -375,18 +375,20 @@ class SkillLibrary:
             results = []
             for skill in skills.values():
                 for scenario in skill["tests"]:
-                    lexical, _ = self._lexical_match(skill, scenario["task"])
-                    missing = set(skill["required_tools"]) - set(scenario.get("available_tools", []))
-                    excluded = any(
-                        rule.casefold() in scenario["task"].casefold()
-                        for rule in skill["exclusions"]
+                    available_tools = scenario.get("available_tools", [])
+                    match_result = self.match(scenario["task"], available_tools)
+                    actual = any(item["id"] == skill["id"] for item in match_result["matches"])
+                    excluded_result = next(
+                        (item for item in match_result["excluded"] if item["id"] == skill["id"]),
+                        None,
                     )
-                    actual = lexical >= 0.15 and not missing and not excluded
+                    missing = set(skill["required_tools"]) - set(available_tools)
                     results.append({
                         "skill_id": skill["id"], "task": scenario["task"],
                         "expected": scenario["should_match"], "actual": actual,
                         "passed": actual == scenario["should_match"],
                         "missing_tools": sorted(missing),
+                        "exclusion_reasons": excluded_result["reasons"] if excluded_result else [],
                         "estimated_tokens": skill["estimated_tokens"],
                     })
             return {

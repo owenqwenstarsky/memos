@@ -13,11 +13,16 @@ class Encoder:
         self.calls = 0
 
     def query(self, text):
-        return np.array([
-            1 + text.lower().count("sqlite"),
-            1 + text.lower().count("network"),
-            1 + text.lower().count("deploy"),
-        ])
+        lowered = text.lower()
+        vector = np.array([
+            lowered.count("sqlite"),
+            lowered.count("network"),
+            lowered.count("deploy"),
+            0,
+        ], dtype=np.float32)
+        if not vector.any():
+            vector[-1] = 1
+        return vector
 
     def passages(self, texts):
         self.calls += 1
@@ -111,6 +116,28 @@ def test_manifest_matching_resources_and_runner(tmp_path):
     assert results["passed"] == 2
     assert results["failed"] == 0
     assert all(item["estimated_tokens"] > 0 for item in results["results"])
+
+
+def test_manifest_runner_uses_the_production_matcher(tmp_path):
+    class SemanticEncoder(Encoder):
+        def query(self, text):
+            lowered = text.lower()
+            return np.array([
+                lowered.count("deploy") + lowered.count("release"),
+                lowered.count("sqlite"),
+                lowered.count("network"),
+            ], dtype=np.float32)
+
+    put(
+        tmp_path, "semantic", "Handle deployment workflows",
+        extra="tests:\n  - task: release the application\n    should_match: true\n",
+        body="Release and deploy the application safely.",
+    )
+    library = SkillLibrary(tmp_path, SemanticEncoder())
+    runtime = library.match("release the application")
+    scenario = library.run_tests("semantic")["results"][0]
+    assert scenario["actual"] is any(item["id"] == "semantic" for item in runtime["matches"])
+    assert scenario["passed"] is True
 
 
 def test_bad_files_conflicts_and_oversized_resources(tmp_path):

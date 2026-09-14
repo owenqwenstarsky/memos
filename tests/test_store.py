@@ -156,6 +156,59 @@ def test_observation_deduplication_contradiction_and_expiry(tmp_path):
     assert store.consolidate_memories([expired["id"]], dry_run=True)["actions"] == []
 
 
+def test_observation_deduplication_respects_scope_and_promotes_evidence(tmp_path):
+    store = Store(tmp_path, Encoder())
+    inferred = store.record_observation(
+        "The sqlite cache directory is local", "agent inference", "/repo", "device"
+    )
+    promoted = store.record_observation(
+        "The sqlite cache directory is local", "direct user statement", "/repo", "device",
+        evidence=["verified by user"],
+    )
+    assert promoted["promoted_from"] == inferred["memory_id"]
+    active = store._rows(project="/repo")
+    assert [row["id"] for row in active] == [promoted["memory_id"]]
+    assert active[0]["status"] == "active"
+    assert active[0]["confidence"] == 0.95
+    assert json.loads(active[0]["evidence"]) == ["verified by user"]
+    reinforced = store.record_observation(
+        "The sqlite cache directory is local", "direct user statement", "/repo", "device",
+        evidence=["verified by user"],
+    )
+    assert reinforced["deduplicated"] is True
+    assert reinforced["memory_id"] == promoted["memory_id"]
+    assert [row["id"] for row in store._rows(project="/repo")] == [promoted["memory_id"]]
+
+    other = store.record_observation(
+        "The sqlite cache directory is local", "direct user statement", "/other", "other-device"
+    )
+    assert other["deduplicated"] is False
+    assert other["memory_id"] != promoted["memory_id"]
+
+
+def test_consolidation_does_not_cross_applicability_boundaries(tmp_path):
+    store = Store(tmp_path, Encoder())
+    first = store.post(
+        "SQLite cache", "Use the local sqlite cache", "/repo-a", "device-a", scope="project"
+    )
+    second = store.post(
+        "SQLite cache", "Use the local sqlite cache", "/repo-b", "device-b", scope="project"
+    )
+    device_one = store.post(
+        "SQLite cache state", "The sqlite cache is enabled", "/repo", "device-a",
+        kind="fact", scope="device",
+    )
+    device_two = store.post(
+        "SQLite cache state", "The sqlite cache is not enabled", "/repo", "device-b",
+        kind="fact", scope="device",
+    )
+    assert store.consolidate_memories(dry_run=True)["actions"] == []
+    assert {row["id"] for row in store._rows(project="/repo-a")} == {first["id"]}
+    assert {row["id"] for row in store._rows(project="/repo-b")} == {second["id"]}
+    assert {row["id"] for row in store._rows(device="device-a")} == {first["id"], device_one["id"]}
+    assert {row["id"] for row in store._rows(device="device-b")} == {second["id"], device_two["id"]}
+
+
 def test_consolidation_is_append_only_and_replays(tmp_path):
     store = Store(tmp_path, Encoder())
     one = store.post("SQLite WAL guidance", "Enable sqlite WAL mode", "/repo", "device")

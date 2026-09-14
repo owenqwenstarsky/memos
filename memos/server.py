@@ -6,7 +6,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from .store import Store
+from .store import Encoder, Store
 from .skills import SkillLibrary
 
 
@@ -144,15 +144,8 @@ def main():
     )
     args = parser.parse_args()
     if args.test_skills is not None:
-        class TestEncoder:
-            def query(self, text):  # pragma: no cover - the manifest runner is lexical-only
-                raise RuntimeError("skill tests do not use embeddings")
-
-            def passages(self, texts):  # pragma: no cover
-                raise RuntimeError("skill tests do not use embeddings")
-
         skill_root = Path(args.skills) if args.skills else args.data.expanduser() / "skills"
-        library = SkillLibrary(skill_root, TestEncoder())
+        library = SkillLibrary(skill_root, Encoder(args.data.expanduser() / "models"))
         print(json.dumps(library.run_tests(args.test_skills or None), indent=2))
         return
     store = Store(args.data)
