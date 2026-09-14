@@ -1,0 +1,54 @@
+{
+  "memories": [
+    {
+      "title": "SQLite WAL prevents reader-writer blocking",
+      "body": "Enable SQLite WAL mode and keep write transactions short. A concurrent regression test verified that readers continue while a writer commits.",
+      "kind": "procedure",
+      "scope": "project",
+      "project": "/evaluation/database"
+    },
+    {
+      "title": "Prefer compact interfaces without pill badges",
+      "body": "The user directly stated a durable preference for compact controls and no pill-shaped badges.",
+      "kind": "preference",
+      "scope": "global",
+      "project": "/evaluation/design"
+    },
+    {
+      "title": "Railway is the deployment target",
+      "body": "The project decision is to deploy the API on Railway and keep PostgreSQL in the same environment.",
+      "kind": "decision",
+      "scope": "repository",
+      "project": "/evaluation/api"
+    },
+    {
+      "title": "Nightly import failed on malformed CSV",
+      "body": "The September import incident was caused by an unquoted comma in a vendor CSV. Input validation now rejects the row before ingestion.",
+      "kind": "incident",
+      "scope": "project",
+      "project": "/evaluation/importer"
+    }
+  ],
+  "queries": [
+    {
+      "task": "How did we fix SQLite database locking?",
+      "project": "/evaluation/database",
+      "relevant_titles": ["SQLite WAL prevents reader-writer blocking"]
+    },
+    {
+      "task": "What visual preferences should I follow for badges?",
+      "project": "/some/new/project",
+      "relevant_titles": ["Prefer compact interfaces without pill badges"]
+    },
+    {
+      "task": "Where should the API be deployed?",
+      "project": "/evaluation/api",
+      "relevant_titles": ["Railway is the deployment target"]
+    },
+    {
+      "task": "Explain photosynthesis in mangrove leaves",
+      "project": "/evaluation/database",
+      "relevant_titles": []
+    }
+  ]
+}

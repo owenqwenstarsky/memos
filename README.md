@@ -1,54 +1,210 @@
-<h1 align="center">Agent memos</h1>
+<h1 align="center">Agent Brain</h1>
 
 <p align="center">
-  A shared memory and skill library for coding agents.<br />
-  Keep what your agents learn. Share it across your devices.
+  A trustworthy, local-first memory and skill service for personal coding agents.<br />
+  Recall what matters. Preserve the evidence. Keep history auditable.
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
-  <a href="#connect-agents">Connect agents</a> &nbsp;·&nbsp;
-  <a href="#shared-skills">Shared skills</a> &nbsp;·&nbsp;
-  <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#setup">Setup</a> &nbsp;·&nbsp;
+  <a href="#mcp-interface">MCP interface</a> &nbsp;·&nbsp;
+  <a href="#skills-v2">Skills v2</a> &nbsp;·&nbsp;
+  <a href="#agent-workflow">Agent workflow</a> &nbsp;·&nbsp;
   <a href="#development">Development</a>
 </p>
 
-| Remember the work | Share the workflow | Keep it local |
+| Remember the work | Maintain the truth | Keep it local |
 | --- | --- | --- |
-| Save findings as Markdown. Find them with semantic and full-text search. | Publish `SKILL.md` files that agents can discover and read on demand. | CPU embeddings, SQLite, and HTTPS over Tailscale. No cloud embedding API. |
+| Save verified knowledge as Markdown and retrieve focused context. | Preserve revisions, evidence, contradictions, and rollback history. | Run CPU embeddings, SQLite, and MCP privately over Tailscale. |
 
-A small, shared memory and skill library for coding agents. One **Streamable HTTP MCP** server exposes `post_memo`, `search_memos`, `list_skills`, `search_skills`, and `get_skill`. The portable skill in [`skills/memos/SKILL.md`](skills/memos/SKILL.md) teaches the memory workflow.
+A local-first memory and skill service for personal coding agents. Markdown is the canonical,
+append-only record; SQLite provides disposable full-text, embedding, relationship, audit, and
+telemetry indexes. One Streamable HTTP MCP server is shared between trusted devices over Tailscale.
 
 ---
 
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="Agent memos — shared memory and skills for coding agents" width="1200" />
+  <img src="docs/assets/banner.svg" alt="Agent memos - shared memory and skills for coding agents" width="1200" />
 </p>
 
 ## How it works
 
+The operating loop is:
+
 ```text
-Agents on laptops / desktops / servers
-                 │ HTTPS over Tailscale
-                 ▼
-         Tailscale Serve → MCP on localhost:8765
-                              ├── live skills folder (SKILL.md files)
-                              ├── Markdown memos (source of truth)
-                              ├── SQLite FTS + embedding index
-                              └── local BGE-small embedding model
+observe -> recall -> act -> verify -> consolidate
 ```
 
-Run **one central server**, not one per device. New devices join your tailnet and use the same URL. No distributed sync, cloud embedding API, GPU, or external database. The host must be awake for memory access.
+Agents retrieve focused, active context; perform the task; record only verified knowledge; and
+maintain duplicates or contradictions through auditable successor records instead of rewriting
+history.
 
-Search combines semantic similarity with full-text ranking, so concepts and literal device names, project paths, and error strings are searchable. Optional filters match project/device exactly. Results include full memo bodies, provenance, IDs, timestamps, and ranking scores (not confidence). All memos are shared; filters are not access controls.
+## Architecture
 
-## Quick start
+```text
+Agents on trusted devices
+          | HTTPS over Tailscale
+          v
+ Tailscale Serve -> MCP on localhost:8765
+                       |-- Markdown memos (canonical history)
+                       |-- append-only audit.jsonl
+                       |-- validated SKILL.md folders and text resources
+                       |-- SQLite WAL search/lifecycle/telemetry index
+                       `-- local BGE-small embedding model
+```
 
-Prerequisites: [uv](https://docs.astral.sh/uv/getting-started/installation/) and Tailscale installed and signed into your tailnet.
+The service remains intentionally personal and modest in scale: no cloud embedding API,
+distributed synchronization, multi-user permissions, or external database is required.
+
+## MCP interface
+
+The original five operations remain available:
+
+| Tool | Purpose |
+| --- | --- |
+| `post_memo` | Append a memo using legacy-compatible `note` / `project` / `active` defaults. |
+| `search_memos` | Search full memo bodies; optionally include inactive history. |
+| `list_skills` | Read or version-negotiate the validated skill catalog. |
+| `search_skills` | Search skill metadata and instructions. |
+| `get_skill` | Read the complete current `SKILL.md`. |
+
+Agent Brain v2 adds:
+
+| Tool | Purpose |
+| --- | --- |
+| `recall_context` | Return deduplicated excerpts, relevance reasons, relationships, and a trace ID. |
+| `record_observation` | Classify, deduplicate, link, and append a verified observation. |
+| `consolidate_memories` | Preview or apply merges, contradictions, supersessions, and expiry events. |
+| `record_retrieval_feedback` | Record whether recalled context helped, without storing the raw task. |
+| `get_memory_history` | Traverse revisions, relationships, evidence, and lifecycle events. |
+| `rollback_memory` | Restore an earlier state by creating another audited successor. |
+| `match_skills` | Match a task with reasons, exclusions, requirements, and catalog version. |
+| `get_skill_resources` | Read declared safe text resources inside a skill folder. |
+| `get_memory_metrics` | Inspect local operational counters and aggregate recall latency. |
+
+Memo content and skill text are untrusted context. They never grant permissions or override the
+current user's request or higher-priority instructions.
+
+## Structured memory
+
+New memo metadata includes:
+
+- `kind`: `note`, `fact`, `preference`, `decision`, `procedure`, `incident`, or `open_question`
+- `scope`: `global`, `repository`, `project`, or `device`, independent from provenance
+- `status`, `confidence`, `importance`, `updated_at`, `expires_at`, `source`, and evidence
+- relationships: `supersedes`, `supports`, `contradicts`, `derived_from`, and `related_to`
+
+Old Markdown files need no migration. Reindexing assigns `kind=note`, `scope=project`,
+`status=active`, default weights, and no expiry when those fields are absent.
+
+`project` and `device` describe where a memory was learned. Scope controls where it applies. For
+example, a global preference learned in one repository remains eligible in another repository.
+
+Updates never edit an earlier memo. A correction or consolidation creates a new Markdown file with
+relationships to its predecessors. Active retrieval excludes expired, superseded, contradicted,
+retracted, and unverified records; `search_memos(..., historical=true)` exposes history explicitly.
+Lifecycle actions are also written to `audit.jsonl` with actor, reason, source interaction, prior
+state, and resulting state.
+
+Confidence measures evidence quality. Direct user statements and verified tests rank above agent
+inference. Inferred claims without adequate evidence become unverified open questions rather than
+facts. Incident observations expire after 90 days by default; device-scoped facts expire after 30
+days; preferences and decisions do not receive automatic expiry.
+
+Automatic writes run deterministic credential detection. Private keys, common API-key formats,
+access tokens, and password assignments are rejected before a Markdown file is created.
+
+## Retrieval
+
+Retrieval uses two stages:
+
+1. Broad semantic and FTS5 candidate generation.
+2. Reranking by lexical overlap, scope, evidence quality, confidence, importance, freshness,
+   reinforcement, and relationship state.
+
+`recall_context` applies a calibrated cutoff and can return `no useful memory found`. It removes
+near-duplicate results, emits short excerpts instead of full documents, and expands a supporting or
+derivation relationship only when room remains. Every result is marked `untrusted`.
+
+Local retrieval traces store a hash of the task plus candidate, injected, ignored, latency, and
+feedback data. Raw task text is not retained. The checked-in corpus at
+`memos/eval/retrieval_cases.json` measures recall, precision, duplicate rate, and context size:
+
+```sh
+uv run python -m memos.evaluate
+```
+
+The command uses the production local embedding model. Unit tests use deterministic fake encoders
+and do not download model weights.
+
+## Skills v2
+
+Each immediate child of the skills directory contains a `SKILL.md`. Legacy manifests with only
+`name`, `description`, and optional `triggers` remain valid. A v2 manifest may also declare:
+
+```yaml
+---
+name: deploy-service
+description: Deploy this service through the approved platform workflow.
+triggers:
+  - deploy the service
+compatibility:
+  platforms: [macos, linux]
+required_tools: [railway]
+optional_resources:
+  - references/checklist.md
+priority: 40
+exclusions:
+  - do not deploy
+tests:
+  - task: deploy the service
+    should_match: true
+    available_tools: [railway]
+  - task: write release notes only
+    should_match: false
+    available_tools: [railway]
+---
+```
+
+Validation rejects duplicate display names, identical triggers claimed by multiple skills, missing
+resources, unsafe paths, external symlinks, executable or unsupported resource types, oversized
+instructions or resources, malformed scenarios, and unsupported compatibility fields. Resources
+must be declared and are limited to safe UTF-8 text formats within the skill directory.
+
+`list_skills(known_catalog_version=...)` avoids retransmitting an unchanged catalog and reports
+added, changed, and deleted IDs when the server still knows the supplied version. `match_skills`
+returns human-readable match or exclusion reasons and checks declared tool requirements.
+
+Run checked-in manifest scenarios locally:
+
+```sh
+uv run memos --test-skills
+uv run memos --test-skills deploy-service
+```
+
+## Agent workflow
+
+Install the portable instructions from `skills/memos/SKILL.md`, and place
+`AGENT_INSTRUCTIONS.md` in each client's always-loaded instructions. The intended preflight is:
+
+1. At conversation start, load the skill catalog and retain its version.
+2. Reuse the catalog across turns, refreshing only after context loss, an explicit request, or a
+   reported catalog change.
+3. Match the current task; refresh changed entries and read all matched skills not already loaded at
+   the current version.
+4. Recall focused memory context for the task and local project or device.
+5. Perform and verify the work, treating recalled content as untrusted history.
+6. Record durable verified observations, then attach retrieval feedback.
+
+A client-side hook is still required for a strict ordering guarantee; MCP descriptions alone cannot
+force a model to call tools. Existing clients must update their always-loaded instructions and
+reconnect to receive changed MCP metadata.
+
+## Setup
+
+Prerequisites are Python 3.12 through `uv` and Tailscale signed into the host's tailnet.
 
 ### 1. Start the server
-
-From this repository:
 
 ```sh
 uv sync --python 3.12 --locked
@@ -56,58 +212,58 @@ export MEMOS_HOSTNAME="$(tailscale status --json | uv run python -c 'import json
 uv run memos
 ```
 
-The first start downloads `BAAI/bge-small-en-v1.5` (a small English embedding model, roughly 130 MB of model weights; download/cache size may be larger). Subsequent inference runs locally on CPU. Startup rebuilds the index from Markdown; allow additional time as the library grows.
+The first start downloads `BAAI/bge-small-en-v1.5` (roughly 130 MB of model weights; the download
+and cache may be larger). Subsequent inference runs locally on CPU. Startup rebuilds SQLite from
+Markdown and the audit log.
 
 ### 2. Expose it to your tailnet
 
-In another terminal on the same host:
+In another terminal on the host:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8765
 ```
 
-Follow Tailscale's prompts if HTTPS needs enabling. The MCP endpoint is:
-
-```text
-https://YOUR-HOST.YOUR-TAILNET.ts.net/mcp
-```
+Connect clients to `https://YOUR-HOST.YOUR-TAILNET.ts.net/mcp`. Use Tailscale Serve, not public
+Funnel. This application has no independent authentication: anyone allowed to connect can read and
+write the personal memory library.
 
 ### 3. Keep it running
 
-Set `MEMOS_HOSTNAME` to that exact hostname whenever launching the server, or pass `--hostname`. The server deliberately listens only on loopback and validates HTTP hosts. Tailscale Serve stays configured in the background; the Python process must also stay running. For always-on use, run the same command under your OS process supervisor, with an absolute working directory, `uv` path, and `MEMOS_HOSTNAME`. Do not run multiple server processes against the same data directory.
+Set `MEMOS_HOSTNAME` whenever launching the server. The server listens on loopback and validates HTTP
+hosts. Run the Python process under the local OS supervisor for always-on use. Do not run multiple
+server processes against the same data directory.
 
-**Security:** use Tailscale **Serve**, not public **Funnel**. This service has no separate application authentication. Restrict access to the host's HTTPS port using tailnet grants/ACLs; everyone allowed to connect can read and post all memories and read all published skills. Local users can also reach the loopback endpoint. Device/project values are agent-reported provenance, not verified identity. Never store secrets. A shared host with untrusted local users requires an additional authentication boundary.
+Useful settings:
 
-## Run with Docker
+- `MEMOS_DATA` / `--data`: data directory, default `~/.local/share/agent-memos`
+- `MEMOS_SKILLS` / `--skills`: published skill directory, default `<data>/skills`
+- `MEMOS_HOST`, `MEMOS_PORT`, and `MEMOS_HOSTNAME`: server binding and host validation
+- `MEMOS_CONSOLIDATION_INTERVAL` / `--consolidation-interval`: worker interval, default 3600 seconds;
+  use `0` to disable
+- `--reindex`: rebuild SQLite and exit
+
+## Docker
 
 ```sh
-export MEMOS_HOSTNAME="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 docker compose up --build -d
 tailscale serve --bg http://127.0.0.1:8765
 ```
 
-The container binds `0.0.0.0:8765` internally and publishes it on host loopback only (`127.0.0.1:8765`), so the Tailscale step above stays the same. `MEMOS_HOSTNAME` is passed through for HTTP host validation; without it, tailnet hostnames are rejected. The first start downloads the embedding model into the `memos-data` volume, which also holds memos, the index, and (by default) skills.
-
-Useful variants:
+The compose file publishes the container on host loopback only. To serve this repository's bundled
+skills read-only:
 
 ```sh
-# Plain docker run with a named volume:
-docker build -t agent-memos .
-docker run -d --name memos -p 127.0.0.1:8765:8765 \
-  -e MEMOS_HOSTNAME="YOUR-HOST.YOUR-TAILNET.ts.net" \
-  -v memos-data:/data agent-memos
-
-# Serve this repo's bundled skills read-only:
 docker run -d --name memos -p 127.0.0.1:8765:8765 \
   -v memos-data:/data -v ./skills:/app/skills:ro \
   -e MEMOS_SKILLS=/app/skills agent-memos
 ```
 
-`--host` / `MEMOS_HOST` and `--port` / `MEMOS_PORT` override the bind address and port; the defaults remain loopback `127.0.0.1:8765` outside Docker. Do not run two servers against the same `/data` volume.
+Do not run multiple containers against the same data volume.
 
 ## Connect agents
 
-Add this to clients that support the `mcpServers` / `url` configuration format (some clients additionally require `"type": "http"`; follow your client's schema):
+Clients using the common MCP configuration format can connect with:
 
 ```json
 {
@@ -119,126 +275,32 @@ Add this to clients that support the `mcpServers` / `url` configuration format (
 }
 ```
 
-Install/copy `skills/memos/` into each agent's supported skills directory. If it does not support skills, put the instructions from `SKILL.md` into its project or agent instructions instead. MCP exposes tools; the skill teaches when and how to use them.
+Install or copy `skills/memos/` into each agent's supported skills directory. If the client does not
+support skills, place `AGENT_INSTRUCTIONS.md` in its always-loaded instructions instead. On each new
+machine, join the same tailnet, configure the MCP URL, and install the instructions. Clients do not
+need a local model or database.
 
-On each new machine: join the same tailnet, configure the same MCP URL, and install the skill. No model or database is needed on clients. The agent obtains **its own** project directory and Tailscale device name using the local CLI, then supplies them when posting.
+## Files and backup
 
-<details>
-<summary><strong>Example: save a finding and search past work</strong></summary>
+- `memos/<id>.md`: canonical immutable memory documents
+- `audit.jsonl`: canonical append-only lifecycle events
+- `index.sqlite3`: disposable WAL index, relationships, traces, and counters
+- `models/`: local embedding cache
+- `skills/<skill-id>/`: validated instructions and declared text resources
 
-Save a memo with its project and device provenance:
-
-```json
-{
-  "title": "SQLite busy errors fixed by closing leaked transaction",
-  "body": "Status: resolved\n\n## Problem\nWrites failed with SQLITE_BUSY.\n\n## Resolution\nClosed the transaction in the error path.\n\n## Verification\nConcurrent-write regression test passed.",
-  "project": "/home/me/projects/api",
-  "device": "laptop.example.ts.net"
-}
-```
-
-Search the library:
-
-```json
-{"query": "sqlite database locked", "limit": 5}
-```
-
-Add `project` and/or `device` to narrow a search. Leave them out for cross-device discovery. Memories are append-only through the tools; post follow-ups referencing previous IDs when a finding changes.
-
-</details>
-
-## Shared skills
-
-Drop skill folders into `~/.local/share/agent-memos/skills/`, or choose another folder:
-
-```sh
-uv run memos --skills /absolute/path/to/skills
-# Alternatively: export MEMOS_SKILLS=/absolute/path/to/skills
-```
-
-For example, serve this repository's existing memory skill with `uv run memos --skills ./skills`. The default folder is `<data>/skills`; it is not automatically populated from this repository.
-
-Each immediate child folder contains one `SKILL.md`:
-
-```text
-skills/
-  debug-sqlite/
-    SKILL.md
-  review-code/
-    SKILL.md
-```
-
-<details>
-<summary><strong>Example skill and file requirements</strong></summary>
-
-Example `debug-sqlite/SKILL.md`:
-
-```markdown
----
-name: debug-sqlite
-description: Diagnose SQLite locking errors and transaction problems.
-triggers:
-  - SQLITE_BUSY or database is locked
-  - Debugging concurrent SQLite writes
----
-
-# Debug SQLite
-
-Inspect transaction lifetimes and connection ownership before changing timeouts.
-Record the verified cause and fix in a memo after testing.
-```
-
-`name` and `description` are required nonempty strings. `triggers` is optional: a string or list of strings. Existing skills that describe their trigger in `description` work unchanged. Folder names are unique tool IDs, independent of the display name. Files are UTF-8, limited to 256 KB, and must remain within the configured folder; external symlinks are rejected. Only immediate child `SKILL.md` files are discovered.
-
-</details>
-
-### Skill tools
-
-| Tool | Purpose |
-| --- | --- |
-| `list_skills()` | Complete catalog of IDs, names, descriptions, triggers, and content versions; no full instructions or model inference. |
-| `search_skills(query, limit=5)` | Semantic + keyword search across metadata and instructions; returns ranked summaries. |
-| `get_skill(skill_id)` | Full current `SKILL.md` content for a matching ID. |
-
-All three tools rescan the folder on every call. Additions, edits, and deletions appear without a restart. Search caches embeddings in memory and only re-embeds changed skills; memo and skill search share the same local model. Invalid files are excluded and reported in the catalog/search `errors` list rather than breaking other skills. Search may return irrelevant nearest matches.
-
-Management is filesystem-based: add, edit, or remove folders on the host. MCP clients have read-only skill access; there is no upload or execution tool. This initial version serves **SKILL.md only**, not bundled scripts, assets, or relative reference files. Use self-contained skills; host-local paths are not automatically available on clients. Only publish skills you trust and intend to share with all permitted clients.
-
-### Load the catalog before every response
-
-Copy [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) into each client's always-loaded instructions. Fetch `list_skills` at conversation start and reuse the catalog across turns. Refresh only when the catalog leaves context (including after compaction), the user requests it, or the agent learns of skill additions, changes, or deletions during the session. There is no polling or expiry timer; changes elsewhere may remain unseen until the next refresh or conversation.
-
-Each turn still checks the request against cached descriptions/triggers and loads relevant full instructions with `get_skill` before acting. Already-loaded instructions can be reused while their catalog version is unchanged. The MCP server advertises the same workflow in its initialization instructions and tool descriptions. Existing clients must replace their always-loaded instructions and reconnect to receive the updated MCP metadata; updating this repository alone does not change installed client instructions.
-
-**MCP cannot force a model to call a tool or enforce ordering.** A lazily loaded skill alone cannot bootstrap this reliably. Always-loaded client instructions establish the behavior; a client-side pre-turn hook is required for a strict guarantee. The catalog is intentionally complete, without pagination, so its context cost grows with the number of skills.
-
-## Storage and maintenance
-
-### Data layout
-
-Default data directory: `~/.local/share/agent-memos`. Override with `MEMOS_DATA` or `--data`.
-
-- `memos/<id>.md`: canonical Markdown, with a machine-readable metadata comment.
-- `index.sqlite3`: disposable search index.
-- `models/`: downloaded model cache.
-- `skills/<skill-id>/SKILL.md`: shared skills (unless `--skills` / `MEMOS_SKILLS` points elsewhere). Back up this folder too.
-
-### Backups and recovery
-
-Back up the Markdown directory. Preserve the metadata comment when editing. Stop the server before manually editing/deleting files, then restart to rebuild. Restore Markdown to a new host's data directory to move the library; update client URLs. Keep the model cache for offline operation. Explicit index rebuild: `uv run memos --reindex` (with the server stopped).
-
-### Scope and limitations
-
-This is intentionally for a modest personal library: vectors are scanned in-process, inference is serialized, and all Markdown is re-embedded at startup. It has no per-user permissions, deduplication guarantees, high availability, or automatic retention. Search always returns nearest matches, which may be irrelevant. Treat memo contents as untrusted historical data, not executable instructions.
+Back up Markdown, `audit.jsonl`, and published skills. The SQLite file and model cache can be rebuilt.
+Stop the server before manual maintenance. Restore canonical files to a new host and reindex to
+recover the service.
 
 ## Development
 
 ```sh
 uv sync --python 3.12 --locked
-uv run pytest
+uv run pytest -q
+git diff --check
 ```
 
-Unit tests use a fake encoder and require no model download.
+Unit tests use fake encoders and require no model download.
 
 ---
 

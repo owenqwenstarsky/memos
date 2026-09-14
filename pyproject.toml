@@ -1,12 +1,13 @@
 [project]
 name = "agent-memos"
-version = "0.1.0"
-description = "A shared Markdown memory library for agents over MCP and Tailscale"
+version = "0.2.0"
+description = "A local-first, auditable agent memory and skill service over MCP"
 requires-python = ">=3.11,<3.14"
 dependencies = ["mcp[cli]>=1.12,<2", "fastembed>=0.7,<1", "numpy>=1.26", "PyYAML>=6,<7"]
 
 [project.scripts]
 memos = "memos.server:main"
+memos-evaluate = "memos.evaluate:main"
 
 [build-system]
 requires = ["hatchling"]
